@@ -1,10 +1,14 @@
-﻿#define WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
 
 #include <iostream>
 #include <windows.h>
 #include <ws2tcpip.h>
 #include <cstdlib> 
+#include <string>
+#include <chrono>
+#include <thread>
 #include <conio.h> 
+
 using namespace std;
 
 #pragma comment(lib, "Ws2_32.lib")
@@ -12,105 +16,293 @@ using namespace std;
 #define DEFAULT_BUFLEN 512
 #define DEFAULT_PORT "27015"
 
+char** map = nullptr; //ці змінні створюються локально в receiver. тому в sender неможливо перевірити перешкоди і інші моменти з пересуванням, якщо їх не зробити глобальними
+unsigned int rows=0, cols=0;
+
+COORD client_smile, server_smile;
 SOCKET ConnectSocket = INVALID_SOCKET;
 
-const int windowWidth = 100;
-const int windowHeight = 100;
+unsigned int client_coins = 0, server_coins = 0;
 
-int smileyX = 5;
-int smileyY = 5;
+bool g_stopThreads = false;
 
-bool isKeyPressed = false;
-int keyDirection = 0;
-
-
-void DrawSmiley() {
-	system("cls");
-
-	COORD position;
-	position.X = smileyX;
-	position.Y = smileyY;
-	SetConsoleCursorPosition(GetStdHandle(-11), position);
-
-	cout << ":-)";
-}
-
-DWORD WINAPI Sender(LPVOID param) {
-
-	char message[2] = " ";
-
-	DrawSmiley();
+DWORD WINAPI TimerThread(LPVOID param) {
+	auto start = chrono::steady_clock::now();
 
 	while (true) {
-		if (_kbhit()) {
-			int key = _getch();
-			if (key == 224 || key == 0) key = _getch();
-			// cout << key << "\n";
-			if (key == 72) { // Стрелка вверх
-				message[0] = 'w';
-				if (smileyY > 0) --smileyY;
-			}
-			else if (key == 80) { // Стрелка вниз
-				message[0] = 's';
-				if (smileyY < windowHeight - 1) ++smileyY;
-			}
-			else  if (key == 77) { // Стрелка вправо
-				message[0] = 'd';
-				if (smileyX < windowWidth - 3) ++smileyX;
-			}
-			else if (key == 75) { // Стрелка влево
-				message[0] = 'a';
-				if (smileyX > 0) --smileyX;
-			}
+		auto now = chrono::steady_clock::now();
+		auto elapsed = chrono::duration_cast<chrono::seconds>(now - start).count();
 
-			int iSendResult = send(ConnectSocket, message, 2, 0);
+		int hours = elapsed / 3600;
+		int minutes = (elapsed % 3600) / 60;
+		int seconds = elapsed % 60;
 
-			if (iSendResult == SOCKET_ERROR) {
-				cout << "send завершился с ошибкой: " << WSAGetLastError() << "\n";
-				cout << "упс, отправка (send) ответного сообщения не состоялась ((\n";
-				closesocket(ConnectSocket);
-				WSACleanup();
-				return 7;
-			}
+		char timeStr[9];
+		sprintf_s(timeStr, "%02d:%02d:%02d", hours, minutes, seconds);
 
-			DrawSmiley();
+		SetConsoleTitleA(timeStr);
+
+		this_thread::sleep_for(chrono::milliseconds(100)); 
+
+		if (elapsed >= 20) {
+			g_stopThreads = true;
+			break;
 		}
 	}
 
 	return 0;
 }
 
-DWORD WINAPI Receiver(LPVOID param) {
-	while (true) {
-		char message[DEFAULT_BUFLEN];
-		int iResult = recv(ConnectSocket, message, DEFAULT_BUFLEN, 0);
-		message[iResult] = '\0';
 
-		if (iResult > 0) {
-			char direction = message[0];
 
-			switch (direction) {
-			case 'a': // Влево
-				if (smileyX > 0)
-					--smileyX;
-				break;
-			case 'd': // Вправо
-				++smileyX;
-				break;
-			case 'w': // Вверх
-				if (smileyY > 0)
-					--smileyY;
-				break;
-			case 's': // Вниз
-				++smileyY;
-				break;
+
+bool canSmileMove(char** map, unsigned int rows, unsigned int cols, int direction) {
+	if (direction == 1) {
+		if (client_smile.X - 1 > 0 && map[client_smile.Y][client_smile.X - 1] != '#')
+			return true;
+		else
+			return false;
+	}
+	else if (direction == 2) {
+		if (client_smile.X + 1 < cols - 1 && map[client_smile.Y][client_smile.X + 1] != '#')
+			return true;
+		else
+			return false;
+	}
+	else if (direction == 3) {
+		if (client_smile.Y - 1 > 0 && map[client_smile.Y - 1][client_smile.X] != '#')
+			return true;
+		else
+			return false;
+	}
+	else if (direction == 4) {
+		if (client_smile.Y + 1 < rows - 1 && map[client_smile.Y + 1][client_smile.X] != '#')
+			return true;
+		else
+			return false;
+	}
+	return false;
+}
+
+bool isClientCollectedCoin(char** map, unsigned int rows, unsigned int cols, int direction) {
+	if (direction == 1) {
+		if (client_smile.X - 1 > 0 && map[client_smile.Y][client_smile.X - 1] == '.')
+			return true;
+		else
+			return false;
+	}
+	else if (direction == 2) {
+		if (client_smile.X + 1 < cols - 1 && map[client_smile.Y][client_smile.X + 1] == '.')
+			return true;
+		else
+			return false;
+	}
+	else if (direction == 3) {
+		if (client_smile.Y - 1 > 0 && map[client_smile.Y - 1][client_smile.X] == '.')
+			return true;
+		else
+			return false;
+	}
+	else if (direction == 4) {
+		if (client_smile.Y + 1 < rows - 1 && map[client_smile.Y + 1][client_smile.X] == '.')
+			return true;
+		else
+			return false;
+	}
+	return false;
+}
+
+DWORD WINAPI Sender(void* param) {
+
+
+	HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+	while (!g_stopThreads) {
+		if (g_stopThreads)
+			TerminateThread(h, 0);
+		int code = _getch();
+		int direction = 0;
+
+		if (code == 224 || code == 0) code = _getch();
+
+		if (code == 75) {//left
+			direction = 1;
+		}
+		else if (code == 77) {//right
+			direction = 2;
+		}
+		else if (code == 72) {//up
+			direction = 3;
+		}
+		else if (code == 80) {//down
+			direction = 4;
+		}
+
+
+		if (canSmileMove(map, rows, cols, direction)) {
+			if (isClientCollectedCoin(map, rows, cols, direction)) {
+				client_coins++;
+			}
+			SetConsoleCursorPosition(h, client_smile);
+			cout << ' ';
+
+			if (code == 75) {//left
+				client_smile.X--;
+			}
+			else if (code == 77) {//right
+				client_smile.X++;
+			}
+			else if (code == 72) {//up
+				client_smile.Y--;
+			}
+			else if (code == 80) {//down
+				client_smile.Y++;
+			}
+			
+			
+
+			SetConsoleCursorPosition(h, client_smile);
+			SetConsoleTextAttribute(h, 9);
+			cout << '$';
+
+			if (server_smile.X == client_smile.X && server_smile.Y == client_smile.Y) {
+				system("title INTERSECTED!");
 			}
 
-			system("cls");
-			DrawSmiley();
-			cout.flush();
-			Sleep(10);
+			char message[200];
+			strcpy_s(message, to_string(direction).c_str());
+			send(ConnectSocket, message, strlen(message), 0);
 		}
+
+
+
+
+	}
+
+
+	return 0;
+}
+
+void ShowMap(char** map, unsigned int height, unsigned int width) {
+	HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+	for (int i = 0; i < height; i++) {
+		for (int j = 0; j < width; j++) {
+			if (map[i][j] == ' ') {
+				SetConsoleTextAttribute(h, 0);
+				cout << ' ';
+			}
+			else if (map[i][j] == '#') {
+				SetConsoleTextAttribute(h, 2);
+				cout << '#';
+			}
+			else if (map[i][j] == '@') {
+				server_smile.X = j;
+				server_smile.Y = i;
+				SetConsoleTextAttribute(h, 12);
+				cout << '@'; //server
+			}
+			else if (map[i][j] == '$') {
+				client_smile.X = j;
+				client_smile.Y = i;
+				SetConsoleTextAttribute(h, 9);
+				cout << '$'; //client
+			}
+			else if (map[i][j] == '.')
+			{
+				SetConsoleTextAttribute(h, 14);
+				cout << '.';
+			}
+		}
+		cout << endl;
+	}
+
+}
+
+void FindClientSmile(char** map, unsigned int rows, unsigned int cols) {
+	for (int i = 0; i < rows; i++) {
+		for (int j = 0; j < cols; j++) {
+			if (map[i][j] == '$')
+			{
+				cout << j << ' ' <<i;
+				return;
+			}
+		}
+	}
+}
+
+
+
+
+void ParseData(char message[],char**&map, unsigned int&rows,unsigned int&cols) {
+	string strMessage = message;
+	int h_ind = strMessage.find('h');
+	int w_ind = strMessage.find('w');
+	int d_ind = strMessage.find('d');
+	string strRows = "";
+	if (w_ind == 2)
+		strRows = strMessage.substr(1, 1);
+	else
+		strRows = strMessage.substr(1, 2);
+	int rows_count = stoi(strRows);
+	int distance = d_ind - w_ind - 1;
+	string columns = strMessage.substr(w_ind + 1, distance);
+	int columns_count = stoi(columns);
+
+	rows = rows_count;
+	cols = columns_count;
+	string map_data = strMessage.substr(d_ind + 1, rows_count * columns_count);
+
+	int map_current = 0;
+	map = new char* [rows_count];
+	for (int i = 0; i < rows_count; i++) {
+		map[i] = new char[columns_count];
+	}
+	for (int i = 0; i < rows_count; i++) {
+		for (int j = 0; j < columns_count; j++)
+			map[i][j] = map_data[map_current++];
+	}
+}
+
+DWORD WINAPI Receiver(LPVOID param) {
+	char message[DEFAULT_BUFLEN];
+	int iResult = recv(ConnectSocket, message, DEFAULT_BUFLEN, 0);
+	message[iResult] = '\0';
+	
+	ParseData(message, map, rows, cols);
+	ShowMap(map, rows, cols);
+
+	
+	HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+	while (!g_stopThreads) {
+		if (g_stopThreads)
+			TerminateThread(h, 0);
+		char message[200];
+		int iResult = recv(ConnectSocket, message, strlen(message), 0);
+		message[iResult] = '\0';
+		string strMessage = message;
+
+		SetConsoleCursorPosition(h, server_smile);
+		SetConsoleTextAttribute(h, 0);
+		cout << ' ';
+		if (iResult > 0) {
+			if (strMessage == "1")
+				server_smile.X--;
+			else if (strMessage == "2")
+				server_smile.X++;
+			else if (strMessage == "3")
+				server_smile.Y--;
+			else if(strMessage=="4")
+				server_smile.Y++;
+
+			SetConsoleCursorPosition(h, server_smile);
+			SetConsoleTextAttribute(h, 12);
+			cout << '@';
+
+			if (server_smile.X == client_smile.X && server_smile.Y == client_smile.Y) {
+				system("title INTERSECTED!");
+			}
+		}
+
+
 	}
 	return 0;
 }
@@ -169,12 +361,11 @@ int main() {
 		return 14;
 	}
 
-	DrawSmiley();
 	// Создаем потоки с использованием CreateThread
-	HANDLE senderThreadHandle = CreateThread(0, 0, Sender, 0, 0, 0);
 	HANDLE receiverThreadHandle = CreateThread(0, 0, Receiver, 0, 0, 0);
-
-	if (senderThreadHandle == NULL || receiverThreadHandle == NULL) {
+	HANDLE senderThreadHandle = CreateThread(0, 0, Sender, 0, 0, 0);
+	HANDLE timeThread = CreateThread(0, 0, TimerThread, 0, 0, 0);
+	if ( receiverThreadHandle == NULL) {
 		cout << "Ошибка создания потоков.\n";
 		closesocket(ConnectSocket);
 		WSACleanup();
@@ -184,15 +375,31 @@ int main() {
 
 
 	// Ожидаем завершения потоков
-	WaitForSingleObject(senderThreadHandle, INFINITE);
 	WaitForSingleObject(receiverThreadHandle, INFINITE);
+	WaitForSingleObject(senderThreadHandle, INFINITE);
+	WaitForSingleObject(timeThread, INFINITE);
 
-	// Закрываем дескрипторы потоков
-	CloseHandle(senderThreadHandle);
+
 	CloseHandle(receiverThreadHandle);
+	CloseHandle(senderThreadHandle);
+	CloseHandle(timeThread);
 
-	closesocket(ConnectSocket);
-	WSACleanup();
+	
+
+	system("cls");
+	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 15);
+	char servCoinsStr[200];
+	string clientCoinsStr = to_string(client_coins);
+	iResult = send(ConnectSocket, clientCoinsStr.c_str(), clientCoinsStr.size(), 0);
+
+	iResult = recv(ConnectSocket, servCoinsStr, strlen(servCoinsStr), 0);
+	servCoinsStr[iResult] = '\0';
+
+	server_coins = stoi(servCoinsStr);
+		
+	cout << "Server collected coins: " << server_coins << endl;
+	cout << "Client collected coins: " << client_coins << endl;
+
 
 	return 0;
 }
