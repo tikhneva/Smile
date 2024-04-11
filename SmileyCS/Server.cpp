@@ -1,9 +1,13 @@
 #define WIN32_LEAN_AND_MEAN
+#define _CRT_SECURE_NO_WARNINGS
 
 #include <iostream>
 #include <windows.h>
 #include <ws2tcpip.h>
+#include <string>
+#include <chrono>
 #include <cstdlib> 
+#include <thread>
 #include <conio.h> 
 using namespace std;
 
@@ -15,117 +19,310 @@ using namespace std;
 SOCKET ClientSocket = INVALID_SOCKET;
 SOCKET ListenSocket = INVALID_SOCKET;
 
-int smileyX = 5;
-int smileyY = 5;
+COORD client_smile, server_smile;
 
-const int windowWidth = 100;
-const int windowHeight = 100;
+unsigned int client_coins = 0, server_coins = 0;
 
-bool isKeyPressed = false;
-int keyDirection = 0;
+bool g_stopThreads = false;
 
-void DrawSmiley() {
-    system("cls");
 
-    COORD position;
-    position.X = smileyX;
-    position.Y = smileyY;
-    SetConsoleCursorPosition(GetStdHandle(-11), position);
-
-    cout << ":-)";
-}
-
-DWORD WINAPI Sender(void* param) {
-    char message[2] = " ";
-
-    DrawSmiley();
+DWORD WINAPI TimerThread(LPVOID param) {
+    auto start = chrono::steady_clock::now();
 
     while (true) {
-        if (_kbhit()) {
-            int key = _getch();
-            if (key == 224 || key == 0) key = _getch();
-            // cout << key << "\n";
-            if (key == 72) { // Стрелка вверх
-                message[0] = 'w';
-                if (smileyY > 0) --smileyY;
-            }
-            else if (key == 80) { // Стрелка вниз
-                message[0] = 's';
-                if (smileyY < windowHeight - 1) ++smileyY;
-            }
-            else  if (key == 77) { // Стрелка вправо
-                message[0] = 'd';
-                if (smileyX < windowWidth - 3) ++smileyX;
-            }
-            else if (key == 75) { // Стрелка влево
-                message[0] = 'a';
-                if (smileyX > 0) --smileyX;
-            }
+        auto now = chrono::steady_clock::now();
+        auto elapsed = chrono::duration_cast<chrono::seconds>(now - start).count();
 
-            int iSendResult = send(ClientSocket, message, 2, 0);
+        int hours = elapsed / 3600;
+        int minutes = (elapsed % 3600) / 60;
+        int seconds = elapsed % 60;
 
-            if (iSendResult == SOCKET_ERROR) {
-                cout << "send завершился с ошибкой: " << WSAGetLastError() << "\n";
-                cout << "упс, отправка (send) ответного сообщения не состоялась ((\n";
-                closesocket(ClientSocket);
-                WSACleanup();
-                return 7;
-            }
+        char timeStr[9];
+        sprintf_s(timeStr, "%02d:%02d:%02d", hours, minutes, seconds);
 
-            DrawSmiley();
+        SetConsoleTitleA(timeStr);
+
+        this_thread::sleep_for(chrono::milliseconds(100));
+
+        if (elapsed >= 20) {
+            g_stopThreads = true; // РЈСЃС‚Р°РЅРѕРІРєР° С„Р»Р°РіР° РґР»СЏ Р·Р°РІРµСЂС€РµРЅРёСЏ РґСЂСѓРіРёС… РїРѕС‚РѕРєРѕРІ
+            break; // РџСЂРµСЂС‹РІР°РµРј С†РёРєР», С‡С‚РѕР±С‹ РЅРµ РїСЂРѕРґРѕР»Р¶Р°С‚СЊ РїСЂРѕРІРµСЂРєРё РІСЂРµРјРµРЅРё
         }
     }
 
-    return 0;
-
 
     return 0;
 }
+
+
+
+bool isServerCollectedCoin(char** map, unsigned int rows, unsigned int cols, int direction) {
+    if (direction == 1) {
+        if (server_smile.X - 1 > 0 && map[server_smile.Y][server_smile.X - 1] == '.')
+            return true;
+        else
+            return false;
+    }
+    else if (direction == 2) {
+        if (server_smile.X + 1 < cols - 1 && map[server_smile.Y][server_smile.X + 1] == '.')
+            return true;
+        else
+            return false;
+    }
+    else if (direction == 3) {
+        if (server_smile.Y - 1 > 0 && map[server_smile.Y - 1][server_smile.X] == '.')
+            return true;
+        else
+            return false;
+    }
+    else if (direction == 4) {
+        if (server_smile.Y + 1 < rows - 1 && map[server_smile.Y + 1][server_smile.X] == '.')
+            return true;
+        else
+            return false;
+    }
+    return false;
+}
+
+void GenerateMap(char** map, unsigned int height, unsigned int width) {
+    srand(time(0));
+    const int walls = 20;
+    const int treasures = 15;
+    bool wallsGenerated = false;
+
+    for (int x = 0; x < walls + treasures; x++) {
+        int coord_x = 2 + rand() % (width - 3);
+        int coord_y = 2 + rand() % (height - 3);
+        if (x < walls)
+            map[coord_y][coord_x] = '#';
+        else
+            map[coord_y][coord_x] = '.';
+    }
+
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            if(map[i][j]!='#'&&map[i][j]!='.')
+              map[i][j] = ' ';
+
+            if (i == 0 || j == 0 || i == height - 1 || j == width - 1)
+                map[i][j] = '#';
+
+            if (i == height / 2 && j == width - 1)
+                map[i][j] = ' ';
+
+            if (i == 1 && j == 1)
+                map[i][j] = '@';
+
+            if (i == height - 2 && j == 1)
+                map[i][j] = '$';
+
+           
+        }
+    }
+  
+    
+}
+
+
+void ShowMap(char** map,unsigned int height, unsigned int width) {
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            if (map[i][j] == ' ') {
+                SetConsoleTextAttribute(h, 0);
+                cout << ' ';
+            }
+            else if (map[i][j] == '#') {
+                SetConsoleTextAttribute(h, 2);
+                cout << '#';
+            }
+            else if (map[i][j] == '@') {
+                SetConsoleTextAttribute(h, 12);
+                server_smile.X = j;
+                server_smile.Y = i;
+                cout << '@'; //server
+            }
+            else if (map[i][j] == '$') {
+                client_smile.X = j;
+                client_smile.Y = i;
+                SetConsoleTextAttribute(h, 9);
+                cout << '$'; //client
+            }
+            else if (map[i][j] == '.')
+            {
+                SetConsoleTextAttribute(h, 14);
+                cout << '.';
+            }
+        }
+        cout << endl;
+    }
+
+}
+
+
+bool canSmileMove(char** map, unsigned int rows, unsigned int cols, int direction) {
+    if (direction == 1) {
+        if (server_smile.X - 1 > 0 && map[server_smile.Y][server_smile.X-1] != '#')
+            return true;
+        else
+            return false;
+    }
+    else if (direction == 2) {
+        if (server_smile.X + 1 < cols - 1 && map[server_smile.Y][server_smile.X+1] != '#')
+            return true;
+        else
+            return false;
+    }
+    else if (direction == 3) {
+        if (server_smile.Y - 1 > 0 && map[server_smile.Y-1][server_smile.X] != '#')
+            return true;
+        else
+            return false;
+    }
+    else if (direction == 4) {
+        if (server_smile.Y+1 < rows-1 && map[server_smile.Y+1][server_smile.X] != '#')
+            return true;
+        else
+            return false;
+    }
+    return false;
+}
+
+string MakeMessage(char** map,unsigned int height, unsigned int width) {
+    string message;
+    message = "h" + to_string(height) + "w" + to_string(width)+"d";
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            message += map[i][j];
+        }
+    }
+    return message;
+}
+DWORD WINAPI Sender(void* param) {
+    unsigned int height = 11, width = 21;
+    char** map = new char* [height];
+    for (int i = 0; i < height; i++) {
+        map[i] = new char[width];
+    }
+    GenerateMap(map, height, width);
+    ShowMap(map, height, width);
+    string message = MakeMessage(map, height, width);
+
+    int iSend = send(ClientSocket, message.c_str(), message.size(), 0);
+
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    while (!g_stopThreads) {
+        if (g_stopThreads)
+            TerminateThread(h, 0);
+        int code = _getch();
+        int direction = 0;
+
+        if (code == 224 || code == 0) code = _getch();
+
+        if (code == 75) {//left
+            direction = 1;
+        }
+        else if (code == 77) {//right
+            direction = 2;
+        }
+        else if (code == 72) {//up
+            direction = 3;
+        }
+        else if (code == 80) {//down
+            direction = 4;
+        }
+
+        if (canSmileMove(map, height, width, direction)) {
+            if (isServerCollectedCoin(map, height, width, direction)) {
+                server_coins++;
+            }
+            SetConsoleCursorPosition(h, server_smile);
+            cout << ' ';
+
+            if (code == 75) {//left
+                server_smile.X--;
+            }
+            else if (code == 77) {//right
+                server_smile.X++;
+            }
+            else if (code == 72) {//up
+                server_smile.Y--;
+            }
+            else if (code == 80) {//down
+                server_smile.Y++;
+            }
+
+            SetConsoleCursorPosition(h, server_smile);
+            SetConsoleTextAttribute(h, 12);
+            cout << '@';
+
+            if (server_smile.X == client_smile.X && server_smile.Y == client_smile.Y) {
+                system("title INTERSECTED!");
+            }
+
+            char message[200];
+            strcpy_s(message, to_string(direction).c_str());
+            send(ClientSocket, message, strlen(message), 0);
+        }
+        this_thread::sleep_for(chrono::milliseconds(100));
+    }
+
+    // РћС‡РёСЃС‚РєР° РїР°РјСЏС‚Рё Рё Р·Р°РєСЂС‹С‚РёРµ СЃРѕРєРµС‚Р°
+    for (int i = 0; i < height; i++) {
+        delete[] map[i];
+    }
+    delete[] map;
+    return 0;
+}
+
 
 DWORD WINAPI Receiver(void* param) {
-    while (true) {
-        char message[DEFAULT_BUFLEN];
-        int iResult = recv(ClientSocket, message, DEFAULT_BUFLEN, 0);
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    while (!g_stopThreads) {
+        if(!g_stopThreads)
+            TerminateThread(h, 0);
+        char message[200];
+        int iResult = recv(ClientSocket, message, strlen(message), 0);
         message[iResult] = '\0';
+        string strMessage = message;
 
+        SetConsoleCursorPosition(h, client_smile);
+        SetConsoleTextAttribute(h, 0);
+        cout << ' ';
         if (iResult > 0) {
-            char direction = message[0];
+            if (strMessage == "1")
+                client_smile.X--;
+            else if (strMessage == "2")
+                client_smile.X++;
+            else if (strMessage == "3")
+                client_smile.Y--;
+            else if (strMessage == "4")
+                client_smile.Y++;
 
-            switch (direction) {
-            case 'a': // Влево
-                if (smileyX > 0)
-                    --smileyX;
-                break;
-            case 'd': // Вправо
-                ++smileyX;
-                break;
-            case 'w': // Вверх
-                if (smileyY > 0)
-                    --smileyY;
-                break;
-            case 's': // Вниз
-                ++smileyY;
-                break;
+            SetConsoleCursorPosition(h, client_smile);
+            SetConsoleTextAttribute(h, 9);
+            cout << '$';
+
+            if (server_smile.X == client_smile.X && server_smile.Y == client_smile.Y) {
+                system("title INTERSECTED!");
             }
-
-            system("cls");
-            DrawSmiley();
-            cout.flush();
-            Sleep(10);
         }
+        this_thread::sleep_for(chrono::milliseconds(100));
     }
+
     return 0;
 }
 
 int main() {
     setlocale(0, "");
-    system("title СЕРВЕР");
+    srand(time(0));
+    system("title РЎР•Р Р’Р•Р ");
 
     WSADATA wsaData;
     int iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (iResult != 0) {
-        cout << "WSAStartup завершился с ошибкой: " << iResult << "\n";
-        cout << "подключение Winsock.dll прошло с ошибкой!\n";
+        cout << "WSAStartup Р·Р°РІРµСЂС€РёР»СЃСЏ СЃ РѕС€РёР±РєРѕР№: " << iResult << "\n";
+        cout << "РїРѕРґРєР»СЋС‡РµРЅРёРµ Winsock.dll РїСЂРѕС€Р»Рѕ СЃ РѕС€РёР±РєРѕР№!\n";
         return 1;
     }
 
@@ -139,8 +336,8 @@ int main() {
     struct addrinfo* result = NULL;
     iResult = getaddrinfo(NULL, DEFAULT_PORT, &hints, &result);
     if (iResult != 0) {
-        cout << "getaddrinfo завершился с ошибкой: " << iResult << "\n";
-        cout << "получение адреса и порта сервера прошло c ошибкой!\n";
+        cout << "getaddrinfo Р·Р°РІРµСЂС€РёР»СЃСЏ СЃ РѕС€РёР±РєРѕР№: " << iResult << "\n";
+        cout << "РїРѕР»СѓС‡РµРЅРёРµ Р°РґСЂРµСЃР° Рё РїРѕСЂС‚Р° СЃРµСЂРІРµСЂР° РїСЂРѕС€Р»Рѕ c РѕС€РёР±РєРѕР№!\n";
         WSACleanup();
         return 2;
     }
@@ -148,8 +345,8 @@ int main() {
     SOCKET ListenSocket = INVALID_SOCKET;
     ListenSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
     if (ListenSocket == INVALID_SOCKET) {
-        cout << "socket завершился с ошибкой: " << WSAGetLastError() << "\n";
-        cout << "создание сокета прошло c ошибкой!\n";
+        cout << "socket Р·Р°РІРµСЂС€РёР»СЃСЏ СЃ РѕС€РёР±РєРѕР№: " << WSAGetLastError() << "\n";
+        cout << "СЃРѕР·РґР°РЅРёРµ СЃРѕРєРµС‚Р° РїСЂРѕС€Р»Рѕ c РѕС€РёР±РєРѕР№!\n";
         freeaddrinfo(result);
         WSACleanup();
         return 3;
@@ -157,8 +354,8 @@ int main() {
 
     iResult = bind(ListenSocket, result->ai_addr, (int)result->ai_addrlen);
     if (iResult == SOCKET_ERROR) {
-        cout << "bind завершился с ошибкой: " << WSAGetLastError() << "\n";
-        cout << "внедрение сокета по IP-адресу прошло с ошибкой!\n";
+        cout << "bind Р·Р°РІРµСЂС€РёР»СЃСЏ СЃ РѕС€РёР±РєРѕР№: " << WSAGetLastError() << "\n";
+        cout << "РІРЅРµРґСЂРµРЅРёРµ СЃРѕРєРµС‚Р° РїРѕ IP-Р°РґСЂРµСЃСѓ РїСЂРѕС€Р»Рѕ СЃ РѕС€РёР±РєРѕР№!\n";
         freeaddrinfo(result);
         closesocket(ListenSocket);
         WSACleanup();
@@ -169,8 +366,8 @@ int main() {
 
     iResult = listen(ListenSocket, SOMAXCONN);
     if (iResult == SOCKET_ERROR) {
-        cout << "listen завершился с ошибкой: " << WSAGetLastError() << "\n";
-        cout << "прослушивание информации от клиента не началось. что-то пошло не так!\n";
+        cout << "listen Р·Р°РІРµСЂС€РёР»СЃСЏ СЃ РѕС€РёР±РєРѕР№: " << WSAGetLastError() << "\n";
+        cout << "РїСЂРѕСЃР»СѓС€РёРІР°РЅРёРµ РёРЅС„РѕСЂРјР°С†РёРё РѕС‚ РєР»РёРµРЅС‚Р° РЅРµ РЅР°С‡Р°Р»РѕСЃСЊ. С‡С‚Рѕ-С‚Рѕ РїРѕС€Р»Рѕ РЅРµ С‚Р°Рє!\n";
         closesocket(ListenSocket);
         WSACleanup();
         return 5;
@@ -178,19 +375,42 @@ int main() {
 
     ClientSocket = accept(ListenSocket, NULL, NULL);
     if (ClientSocket == INVALID_SOCKET) {
-        cout << "accept завершился с ошибкой: " << WSAGetLastError() << "\n";
-        cout << "соединение с клиентским приложением не установлено!\n";
+        cout << "accept Р·Р°РІРµСЂС€РёР»СЃСЏ СЃ РѕС€РёР±РєРѕР№: " << WSAGetLastError() << "\n";
+        cout << "СЃРѕРµРґРёРЅРµРЅРёРµ СЃ РєР»РёРµРЅС‚СЃРєРёРј РїСЂРёР»РѕР¶РµРЅРёРµРј РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ! РїРµС‡Р°Р»СЊ!\n";
         closesocket(ListenSocket);
         WSACleanup();
         return 6;
     }
 
-    DrawSmiley();
 
-    CreateThread(0, 0, Receiver, 0, 0, 0);
-    CreateThread(0, 0, Sender, 0, 0, 0);
+    HANDLE timeCounterHandle = CreateThread(0, 0, TimerThread, 0, 0, 0);
 
-    Sleep(INFINITE);
+    HANDLE senderHandle = CreateThread(0, 0, Sender, 0, 0, 0);
+    HANDLE receiverHandle = CreateThread(0, 0, Receiver, 0, 0, 0);
+
+    WaitForSingleObject(receiverHandle, INFINITE);
+    WaitForSingleObject(senderHandle, INFINITE);
+    WaitForSingleObject(timeCounterHandle, INFINITE);
+
+
+    CloseHandle(receiverHandle);
+    CloseHandle(senderHandle);
+    CloseHandle(timeCounterHandle);
+    
+    system("cls");
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 15);
+
+    char clientCoinsStr[200];
+    string servCoinsStr = to_string(server_coins);
+    iResult = recv(ClientSocket, clientCoinsStr, strlen(clientCoinsStr), 0);
+    clientCoinsStr[iResult] = '\0';
+    client_coins = stoi(clientCoinsStr);
+
+    iResult = send(ClientSocket, servCoinsStr.c_str(), servCoinsStr.size(), 0);
+    server_coins = stoi(servCoinsStr);
+
+    cout << "Server collected coins: " << server_coins << endl;
+    cout << "Client collected coins: " << client_coins << endl;
 
     return 0;
 }
